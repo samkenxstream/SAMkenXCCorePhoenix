@@ -102,7 +102,7 @@ object LegacyMigrationHelper {
         UserPrefs.saveElectrumServer(context, Prefs.getElectrumServer(context).takeIf { it.isNotBlank() }?.let {
             val hostPort = HostAndPort.fromString(it).withDefaultPort(50002)
             // TODO: handle onion addresses and TOR
-            ServerAddress(hostPort.host, hostPort.port, TcpSocket.TLS.TRUSTED_CERTIFICATES)
+            ServerAddress(hostPort.host, hostPort.port, TcpSocket.TLS.TRUSTED_CERTIFICATES())
         })
 
         // -- payment settings
@@ -277,7 +277,8 @@ object LegacyMigrationHelper {
                     amount = status.amount().toLong().msat,
                     serviceFee = payToOpenMeta?.fee_sat?.sat?.toMilliSatoshi() ?: 0.msat,
                     fundingFee = 0.sat,
-                    channelId = ByteVector32.Zeroes
+                    channelId = ByteVector32.Zeroes,
+                    confirmed = true,
                 )
             } else {
                 IncomingPayment.ReceivedWith.LightningPayment(

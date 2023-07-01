@@ -107,8 +107,10 @@ class AppDelegate: UIResponder, UIApplicationDelegate, MessagingDelegate {
 		}.store(in: &cancellables)
 
 		CrossProcessCommunication.shared.start(actor: .mainApp) { (_: XpcMessage) in
-			self.didReceiveMessageFromAppExtension()
+			self.didReceivePaymentViaAppExtension()
 		}
+		
+		NotificationsManager.shared.requestPermissionForProvisionalNotifications()
 		
 		return true
 	}
@@ -128,8 +130,11 @@ class AppDelegate: UIResponder, UIApplicationDelegate, MessagingDelegate {
 	func _applicationDidBecomeActive(_ application: UIApplication) {
 		log.trace("### applicationDidBecomeActive(_:)")
 		
-		UIApplication.shared.applicationIconBadgeNumber = 0
+		if GroupPrefs.shared.badgeCount > 0 {
+			didReceivePaymentViaAppExtension()
+		}
 		GroupPrefs.shared.badgeCount = 0
+		UIApplication.shared.applicationIconBadgeNumber = 0
 	}
 	
 	func _applicationWillResignActive(_ application: UIApplication) {
@@ -189,9 +194,8 @@ class AppDelegate: UIResponder, UIApplicationDelegate, MessagingDelegate {
 	func application(
 		_ application: UIApplication,
 		didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data
-	) -> Void
-	{
-		log.trace("application(didRegisterForRemoteNotificationsWithDeviceToken:)")
+	) {
+		log.trace("application(_:didRegisterForRemoteNotificationsWithDeviceToken:)")
 		
 		let pushToken = deviceToken.map { String(format: "%02.2hhx", $0) }.joined()
 		log.debug("pushToken: \(pushToken)")
@@ -203,10 +207,8 @@ class AppDelegate: UIResponder, UIApplicationDelegate, MessagingDelegate {
 	func application(
 		_ application: UIApplication,
 		didFailToRegisterForRemoteNotificationsWithError error: Error
-	) -> Void
-	{
-		log.trace("application(didFailToRegisterForRemoteNotificationsWithError:)")
-		
+	) {
+		log.trace("application(_:didFailToRegisterForRemoteNotificationsWithError:)")
 		log.error("Remote notification support is unavailable due to error: \(error.localizedDescription)")
 	}
 
@@ -214,135 +216,23 @@ class AppDelegate: UIResponder, UIApplicationDelegate, MessagingDelegate {
 		_ application: UIApplication,
 		didReceiveRemoteNotification userInfo: [AnyHashable : Any],
 		fetchCompletionHandler completionHandler: @escaping (UIBackgroundFetchResult) -> Void
-	) -> Void
-	{
-		BusinessManager.shared.processPushNotification(userInfo, completionHandler)
+	) {
+		log.trace("application(_:didReceiveRemoteNotification:fetchCompletionHandler:)")
+		
+		Biz.processPushNotification(userInfo, completionHandler)
 	}
 	
-	func messaging(_ messaging: Messaging, didReceiveRegistrationToken fcmToken: String?) {
-		assertMainThread()
-		
-		log.trace("messaging(:didReceiveRegistrationToken:)")
+	func messaging(
+		_ messaging: Messaging,
+		didReceiveRegistrationToken fcmToken: String?
+	) {
+		log.trace("messaging(_:didReceiveRegistrationToken:)")
 		log.debug("Firebase registration token: \(String(describing: fcmToken))")
+		
+		assertMainThread()
 		
 		if let fcmToken = fcmToken {
 			Biz.setFcmToken(fcmToken)
-		}
-	}
-	
-	// --------------------------------------------------
-	// MARK: Local Notifications
-	// --------------------------------------------------
-	
-	func requestPermissionForLocalNotifications(_ callback: @escaping (Bool) -> Void) {
-		log.trace("requestPermissionForLocalNotifications()")
-		
-		let center = UNUserNotificationCenter.current()
-		center.requestAuthorization(options: [.alert, .sound, .badge]) { granted, error in
-			
-			log.debug("UNUserNotificationCenter.requestAuthorization(): granted = \(granted)")
-			if let error = error {
-				// How can an error possibly occur ?!?
-				// Apple doesn't tell us...
-				log.debug("UNUserNotificationCenter.requestAuthorization(): \(String(describing: error))")
-			}
-			
-			callback(granted)
-		}
-	}
-	
-	func displayLocalNotification_receivedPayment(_ payment: Lightning_kmpIncomingPayment) {
-		log.trace("displayLocalNotification_receivedPayment()")
-		
-		// We are having problems interacting with the `payment` parameter outside the main thread.
-		// This might have to do with the goofy Kotlin freezing stuff.
-		// So let's be safe and always operate on the main thread here.
-		//
-		let handler = {(settings: UNNotificationSettings) -> Void in
-			
-			guard settings.authorizationStatus == .authorized else {
-				return
-			}
-			
-			let paymentInfos = [
-				WalletPaymentInfo(
-					payment: payment,
-					metadata: WalletPaymentMetadata.empty(),
-					fetchOptions: WalletPaymentFetchOptions.companion.None
-				)
-			]
-			
-			let currencyPrefs = CurrencyPrefs()
-			let bitcoinUnit = currencyPrefs.bitcoinUnit
-			let fiatCurrency = currencyPrefs.fiatCurrency
-			let exchangeRate = currencyPrefs.fiatExchangeRate(fiatCurrency: fiatCurrency)
-			
-			let content = UNMutableNotificationContent()
-			content.fillForReceivedPayments(
-				payments: paymentInfos,
-				bitcoinUnit: bitcoinUnit,
-				exchangeRate: exchangeRate
-			)
-			
-			let request = UNNotificationRequest(
-				identifier: payment.id(),
-				content: content,
-				trigger: nil
-			)
-			
-			UNUserNotificationCenter.current().add(request) { error in
-				if let error = error {
-					log.error("NotificationCenter.add(request): error: \(String(describing: error))")
-				}
-			}
-		}
-		
-		UNUserNotificationCenter.current().getNotificationSettings { settings in
-			
-			if Thread.isMainThread {
-				handler(settings)
-			} else {
-				DispatchQueue.main.async { handler(settings) }
-			}
-		}
-	}
-	
-	func displayLocalNotification_revokedCommit() {
-		log.trace("displayLocalNotification_revokedCommit()")
-		
-		let handler = {(settings: UNNotificationSettings) -> Void in
-			
-			guard settings.authorizationStatus == .authorized else {
-				return
-			}
-			
-			GroupPrefs.shared.badgeCount += 1
-			
-			let content = UNMutableNotificationContent()
-			content.title = "Some of your channels have closed"
-			content.body = "Please start Phoenix to review your channels."
-			content.badge = NSNumber(value: GroupPrefs.shared.badgeCount)
-			
-			let request = UNNotificationRequest(
-				identifier: "revokedCommit",
-				content: content,
-				trigger: nil
-			)
-			
-			UNUserNotificationCenter.current().add(request) { error in
-				if let error = error {
-					log.error("NotificationCenter.add(request): error: \(String(describing: error))")
-				}
-			}
-		}
-		
-		UNUserNotificationCenter.current().getNotificationSettings { settings in
-			
-			if Thread.isMainThread {
-				handler(settings)
-			} else {
-				DispatchQueue.main.async { handler(settings) }
-			}
 		}
 	}
 
@@ -350,10 +240,9 @@ class AppDelegate: UIResponder, UIApplicationDelegate, MessagingDelegate {
 	// MARK: CrossProcessCommunication
 	// --------------------------------------------------
 
-	private func didReceiveMessageFromAppExtension() {
-		log.trace("didReceiveMessageFromAppExtension()")
+	private func didReceivePaymentViaAppExtension() {
+		log.trace("didReceivePaymentViaAppExtension()")
 		
-		// We received a message from the notification-service-extension.
 		// This usually happens when:
 		// - phoenix was running in the background
 		// - a received push notification launched our notification-service-extension

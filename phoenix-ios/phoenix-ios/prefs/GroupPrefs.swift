@@ -27,6 +27,7 @@ fileprivate enum Key: String {
 	case electrumConfig
 	case isTorEnabled
 	case badgeCount
+	case discreetNotifications
 }
 
 /// Group preferences, stored in the iOS UserDefaults system.
@@ -42,13 +43,17 @@ class GroupPrefs {
 		return UserDefaults.group
 	}
 	
+	// --------------------------------------------------
+	// MARK: Currencies
+	// --------------------------------------------------
+	
 	var currencyType: CurrencyType {
 		get { defaults.currencyType?.jsonDecode() ?? .bitcoin }
 		set { defaults.currencyType = newValue.jsonEncode() }
 	}
 	
 	lazy private(set) var fiatCurrencyPublisher: AnyPublisher<FiatCurrency, Never> = {
-		defaults.publisher(for: \.fiatCurrency, options: [.new])
+		defaults.publisher(for: \.fiatCurrency, options: [.initial, .new])
 			.map({ (str: String?) -> FiatCurrency in
 				FiatCurrency.deserialize(str) ?? self.defaultFiatCurrency()
 			})
@@ -66,7 +71,7 @@ class GroupPrefs {
 	}
 	
 	lazy private(set) var bitcoinUnitPublisher: AnyPublisher<BitcoinUnit, Never> = {
-		defaults.publisher(for: \.bitcoinUnit, options: [.new])
+		defaults.publisher(for: \.bitcoinUnit, options: [.initial, .new])
 			.map({ (str: String?) -> BitcoinUnit in
 				BitcoinUnit.deserialize(str) ?? self.defaultBitcoinUnit
 			})
@@ -82,7 +87,7 @@ class GroupPrefs {
 	}
 	
 	lazy private(set) var currencyConverterListPublisher: AnyPublisher<[Currency], Never> = {
-		defaults.publisher(for: \.currencyConverterList, options: [.new])
+		defaults.publisher(for: \.currencyConverterList, options: [.initial, .new])
 			.map({ (str: String?) -> [Currency] in
 				Currency.deserializeList(str)
 			})
@@ -113,8 +118,12 @@ class GroupPrefs {
 		}
 	}
 	
+	// --------------------------------------------------
+	// MARK: User Config
+	// --------------------------------------------------
+	
 	lazy private(set) var electrumConfigPublisher: AnyPublisher<ElectrumConfigPrefs?, Never> = {
-		defaults.publisher(for: \.electrumConfig, options: [.new])
+		defaults.publisher(for: \.electrumConfig, options: [.initial, .new])
 			.map({ (data: Data?) -> ElectrumConfigPrefs? in
 				data?.jsonDecode()
 			})
@@ -128,7 +137,7 @@ class GroupPrefs {
 	}
 
 	lazy private(set) var isTorEnabledPublisher: AnyPublisher<Bool, Never> = {
-		defaults.publisher(for: \.isTorEnabled, options: [.new])
+		defaults.publisher(for: \.isTorEnabled, options: [.initial, .new])
 			.removeDuplicates()
 			.eraseToAnyPublisher()
 	}()
@@ -138,9 +147,18 @@ class GroupPrefs {
 		set { defaults.isTorEnabled = newValue }
 	}
 	
+	// --------------------------------------------------
+	// MARK: Push Notifications
+	// --------------------------------------------------
+	
 	var badgeCount: Int {
 		get { defaults.badgeCount }
 		set { defaults.badgeCount = newValue }
+	}
+	
+	var discreetNotifications: Bool {
+		get { defaults.discreetNotifications }
+		set { defaults.discreetNotifications = newValue }
 	}
 	
 	// --------------------------------------------------
@@ -156,6 +174,7 @@ class GroupPrefs {
 		defaults.removeObject(forKey: Key.electrumConfig.rawValue)
 		defaults.removeObject(forKey: Key.isTorEnabled.rawValue)
 		defaults.removeObject(forKey: Key.badgeCount.rawValue)
+		defaults.removeObject(forKey: Key.discreetNotifications.rawValue)
 	}
 
 	// --------------------------------------------------
@@ -235,5 +254,10 @@ extension UserDefaults {
 	@objc fileprivate var badgeCount: Int {
 		get { integer(forKey: Key.badgeCount.rawValue) }
 		set { set(newValue, forKey: Key.badgeCount.rawValue) }
+	}
+	
+	@objc fileprivate var discreetNotifications: Bool {
+		get { bool(forKey: Key.discreetNotifications.rawValue) }
+		set { set(newValue, forKey: Key.discreetNotifications.rawValue) }
 	}
 }
